@@ -1,0 +1,223 @@
+import random
+
+
+class Dot:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+
+class Ship:
+    def __init__(self, length, bow, direction):
+        self.length = length
+        self.bow = bow
+        self.direction = direction
+        self.lives = length
+
+    def dots(self):
+        ship_dots = []
+        x, y = self.bow.x, self.bow.y
+        for _ in range(self.length):
+            ship_dots.append(Dot(x, y))
+            if self.direction == 'vertical':
+                y += 1
+            else:
+                x += 1
+        return ship_dots
+
+
+class BoardException(Exception):
+    pass
+
+
+class BoardOutException(BoardException):
+    def __str__(self):
+        return 'Выстрел за пределы доски!'
+
+
+class BoardUsedException(BoardException):
+    def __str__(self):
+        return 'Вы уже стреляли в эту клетку!'
+
+
+class BoardWrongShipException(BoardException):
+    pass
+
+
+class Board:
+    def __init__(self, size=3, hidden=False):
+        self.size = size
+        self.hidden = hidden
+
+        self.board = [['O'] * size for _ in range(size)]
+        self.ships = []
+        self.dots = []
+
+    def add_ship(self, ship):
+        for dot in ship.dots():
+            if self.out(dot) or dot in self.dots:
+                raise BoardWrongShipException()
+        for dot in ship.dots():
+            self.board[dot.x][dot.y] = '■'
+            self.dots.append(dot)
+
+        self.ships.append(ship)
+        self.contour(ship)
+
+    def contour(self, ship, verb=False):
+        near = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 0), (0, 1),
+            (1, -1), (1, 0), (1, 1),
+        ]
+
+        for dot in ship.dots():
+            for dx, dy in near:
+                x, y = dot.x + dx, dot.y + dy
+                if not (self.out(Dot(x, y)) or self.dots):
+                    self.board[x][y] = '.'
+                    if verb:
+                        self.show()
+
+    def __str__(self):
+        result = ''
+        for row in self.board:
+            result += ' '.join(row) + '\n'
+        return result
+
+    def out(self, dot):
+        return not (0 <= dot.x < self.size and 0 <= dot.y < self.size)
+
+    def shot(self, dot):
+        if self.out(dot):
+            raise BoardOutException()
+        if dot in self.dots:
+            raise BoardUsedException()
+
+        self.dots.append(dot)
+
+        for ship in self.ships:
+            if dot in ship.dots():
+                ship.lives -= 1
+                self.board[dot.x][dot.y] = 'X'
+                if ship.lives == 0:
+                    self.contour(ship, verb=True)
+                    print('Корабль уничтожен!')
+                    return False
+                else:
+                    print('Корабль подбит!')
+                    return True
+
+        self.board[dot.x][dot.y] = '*'
+        print('Мимо!')
+        return False
+
+
+class Player:
+    def __init__(self, board, enemy_board):
+        self.board = board
+        self.enemy_board = enemy_board
+
+    def ask(self):
+        pass
+
+    def move(self):
+        while True:
+            try:
+                target = self.ask()
+                success = self.enemy_board.shot(target)
+                return success
+            except BoardException as e:
+                print(e)
+
+
+class User(Player):
+    def ask(self):
+        while True:
+            coords = input('Введите координаты выстрела (в формате x,y): ')
+            try:
+                x, y = map(int, coords.split(','))
+                if not self.enemy_board.out(Dot(x, y)) and not self.enemy_board.dots[Dot(x, y)]:
+                    return Dot(x, y)
+                else:
+                    print('Координаты некорректны. Попробуйте еще раз.')
+            except ValueError:
+                print('Некорректный формат координат. Попробуйте еще раз.')
+
+
+class AI(Player):
+    def ask(self):
+        while True:
+            x = random.randint(0, self.enemy_board.size - 1)
+            y = random.randint(0, self.enemy_board.size - 1)
+            target = Dot(x, y)
+            if not self.enemy_board.out(target) and not self.enemy_board.dots[target]:
+                return target
+
+
+class Game:
+    def __init__(self):
+        player_board = self.random_board()
+        enemy_board = self.random_board()
+
+        self.player = User(player_board, enemy_board)
+        self.ai = AI(enemy_board, player_board)
+
+    @staticmethod
+    def random_board():
+        board = Board()
+        ships = [3, 2, 2, 1, 1, 1, 1]
+        random.shuffle(ships)
+        for ship_size in ships:
+            while True:
+                ship = Ship(ship_size, Dot(random.randint(0, 2), random.randint(0, 2)),
+                            'vertical' if random.randint(0, 1) else 'horizontal')
+                try:
+                    board.add_ship(ship)
+                    break
+                except BoardWrongShipException:
+                    pass
+        return board
+
+    @staticmethod
+    def greet():
+        print('Добро пожаловать в игру "Крестики-нолики"!')
+        print('Формат ввода координат: x,y')
+        print('Например, для выстрела по клетке (1, 2) введите "1,2"')
+
+    def loop(self):
+        num_moves = 0
+        while True:
+            print('*** Ваша доска ***')
+            print(self.player.board)
+            print('*** Доска противника ***')
+            print(self.ai.board)
+
+            if num_moves % 2 == 0:
+                print('Ход игрока')
+                player_turn = self.player.move()
+                if player_turn:
+                    num_moves -= 1  # Повторный ход игрока
+            else:
+                print('Ход компьютера')
+                ai_turn = self.ai.move()
+                if ai_turn:
+                    num_moves -= 1  # Повторный ход компьютера
+
+            if self.ai.board.ships == 0:
+                print('Вы победили! Поздравляем!')
+                break
+            elif self.player.board.ships == 0:
+                print('Компьютер победил. Попробуйте еще раз!')
+                break
+
+            num_moves += 1
+
+
+if __name__ == '__main__':
+    game = Game()
+    game.greet()
+    game.loop()
